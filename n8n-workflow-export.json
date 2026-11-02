@@ -1,0 +1,154 @@
+{
+  "id": "lendloopLoanStatus01",
+  "name": "LendLoop - Loan status changed",
+  "active": false,
+  "nodes": [
+    {
+      "id": "6f1c1a52-7f3e-4b0e-9a57-0a4f3a1d2c01",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "b7a4f4f0-3a2c-4e55-8d7e-2c5d9f1e6a10",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lendloop-loan-status",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      }
+    },
+    {
+      "id": "6f1c1a52-7f3e-4b0e-9a57-0a4f3a1d2c02",
+      "name": "Verify HMAC signature",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Rejects anything not signed by LendLoop. The signature is recomputed over the\n// exact bytes received, so the Webhook node must keep its \"Raw Body\" option on.\nconst crypto = require('crypto');\n\nconst MAX_AGE_SECONDS = 300;\nconst reject = (reason) => [{ json: { valid: false, reason } }];\n\nconst secret = $env.N8N_WEBHOOK_SECRET;\nif (!secret) return reject('N8N_WEBHOOK_SECRET is not set');\n\nconst item = $input.first();\nconst headers = item.json.headers ?? {};\nconst timestamp = headers['x-lendloop-timestamp'] ?? '';\nconst received = headers['x-lendloop-signature'] ?? '';\n\nconst age = Math.abs(Date.now() / 1000 - Number(timestamp));\nif (!/^\\d+$/.test(timestamp) || age > MAX_AGE_SECONDS) {\n  return reject('stale or missing timestamp');\n}\n\nconst rawBody = await this.helpers.getBinaryDataBuffer(0, 'data');\nconst expected = 'sha256=' + crypto\n  .createHmac('sha256', secret)\n  .update(timestamp + '.')\n  .update(rawBody)\n  .digest('hex');\n\nconst a = Buffer.from(received);\nconst b = Buffer.from(expected);\nif (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {\n  return reject('invalid signature');\n}\n\nreturn [{ json: { valid: true, event: JSON.parse(rawBody.toString('utf8')) } }];\n"
+      }
+    },
+    {
+      "id": "6f1c1a52-7f3e-4b0e-9a57-0a4f3a1d2c03",
+      "name": "Signature valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "6f1c1a52-7f3e-4b0e-9a57-0a4f3a1d2c04",
+      "name": "Accepted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        720,
+        -100
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"received\": true, \"id\": $json.event.id } }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "6f1c1a52-7f3e-4b0e-9a57-0a4f3a1d2c05",
+      "name": "Rejected",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        720,
+        100
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"error\": \"unauthorized\" } }}",
+        "options": {
+          "responseCode": 401
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Verify HMAC signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify HMAC signature": {
+      "main": [
+        [
+          {
+            "node": "Signature valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Signature valid?": {
+      "main": [
+        [
+          {
+            "node": "Accepted",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

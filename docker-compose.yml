@@ -1,0 +1,31 @@
+# Start with: docker compose --env-file .env.local up -d
+services:
+  n8n:
+    image: n8nio/n8n:2.45.7
+    restart: unless-stopped
+    ports:
+      # Local machine only: n8n is not exposed to the network.
+      - "127.0.0.1:5678:5678"
+    environment:
+      N8N_HOST: localhost
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: http://localhost:5678/
+      GENERIC_TIMEZONE: ${GENERIC_TIMEZONE:-America/Mexico_City}
+      N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+      # Compose refuses to start without the secret.
+      N8N_WEBHOOK_SECRET: ${N8N_WEBHOOK_SECRET:?Set N8N_WEBHOOK_SECRET in .env.local}
+      # Needed by the signature check in n8n-workflow-export.json.
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      NODE_FUNCTION_ALLOW_BUILTIN: crypto
+    volumes:
+      - n8n_data:/home/node/.n8n
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:5678/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  n8n_data:
